@@ -80,7 +80,6 @@ def hflip(image, target):
 
     return flipped_image, target
 
-
 def resize(image, target, size, max_size=None):
     # size can be min_size (scalar) or (w, h) tuple
 
@@ -205,7 +204,6 @@ class RandomResize(object):
     def __call__(self, img, target=None):
         size = random.choice(self.sizes)
         return resize(img, target, size, self.max_size)
-
 
 class RandomPad(object):
     def __init__(self, max_pad):

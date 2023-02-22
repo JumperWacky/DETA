@@ -123,6 +123,10 @@ class ConvertCocoPolysToMask(object):
 
 
 def make_coco_transforms(image_set, bigger):
+    """
+        image of trainset use random resize, random szie crop, and normalize
+        image of valset only use fixed size's resize and normalize
+    """
 
     normalize = T.Compose([
         T.ToTensor(),
@@ -131,13 +135,16 @@ def make_coco_transforms(image_set, bigger):
 
     if 'train' in image_set:
         scales = [480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800]
+        # scales = [960, 1024, 1088, 1152, 1216, 1280, 1344, 1408, 1472, 1536, 1600]
     if 'val' in image_set or 'test' in image_set:
         scales = [800]
 
-    max_size = 1333
+    max_size = 1280    # WJ-own use
+    # max_size = 1333
     if bigger:
-        scales = [int(1.5*s) for s in scales]
-        max_size = 2000
+        # scales = [int(1.5*s) for s in scales]
+        scales = [int(2*s) for s in scales]
+        max_size = 2000    # WJ-own use
 
     if image_set == 'train':
         return T.Compose([
@@ -145,8 +152,9 @@ def make_coco_transforms(image_set, bigger):
             T.RandomSelect(
                 T.RandomResize(scales, max_size=max_size),
                 T.Compose([
-                    T.RandomResize([400, 500, 600]),
-                    T.RandomSizeCrop(384, 600),
+                    # T.RandomResize([400, 500, 600]),
+                    # T.RandomSizeCrop(384, 600),
+                    T.RandomSizeCrop(500, 700),
                     T.RandomResize(scales, max_size=max_size),
                 ])
             ),
@@ -161,7 +169,6 @@ def make_coco_transforms(image_set, bigger):
 
     raise ValueError(f'unknown {image_set}')
 
-
 def build(image_set, args):
     root = Path(args.coco_path)
     assert root.exists(), f'provided COCO path {root} does not exist'
@@ -170,8 +177,10 @@ def build(image_set, args):
         "train": (root / "train2017", root / "annotations" / f'{mode}_train2017.json'),
         "val": (root / "val2017", root / "annotations" / f'{mode}_val2017.json'),
     }
+    print("[Debug Info] PATHS=", PATHS)
 
     img_folder, ann_file = PATHS[image_set]
+    print(f"[Debug Info] img_folder={img_folder}, ann_file={ann_file}")
     dataset = CocoDetection(img_folder, ann_file, transforms=make_coco_transforms(image_set, args.bigger), return_masks=args.masks,
                             cache_mode=args.cache_mode, local_rank=get_local_rank(), local_size=get_local_size())
     return dataset

@@ -177,16 +177,15 @@ def main():
         current_env["LOCAL_RANK"] = str(local_rank)
 
         cmd = [args.training_script] + args.training_script_args
-
         process = subprocess.Popen(cmd, env=current_env)
         processes.append(process)
 
+    torch.cuda.empty_cache()
     for process in processes:
         process.wait()
         if process.returncode != 0:
             raise subprocess.CalledProcessError(returncode=process.returncode,
                                                 cmd=process.args)
-
 
 if __name__ == "__main__":
     main()

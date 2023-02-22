@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+
 # ------------------------------------------------------------------------
 # Deformable DETR
 # Copyright (c) 2020 SenseTime. All Rights Reserved.
@@ -7,8 +8,13 @@
 
 set -x
 
-GPUS=$1
-RUN_COMMAND=${@:2}
+# GPUS=$1
+# RUN_COMMAND=${@:2}
+ARGS=${@}
+GPUS=`echo ${ARGS} | awk '{print $1}'`
+RUN_COMMAND=`echo ${ARGS} | awk '{for (i=2;i<=NF;i++) printf("%s ", $i)}'`
+echo $GPUS
+echo $RUN_COMMAND
 if [ $GPUS -lt 8 ]; then
     GPUS_PER_NODE=${GPUS_PER_NODE:-$GPUS}
 else
@@ -18,7 +24,8 @@ MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
 MASTER_PORT=${MASTER_PORT:-"29500"}
 NODE_RANK=${NODE_RANK:-0}
 
-let "NNODES=GPUS/GPUS_PER_NODE"
+# let "NNODES=GPUS/GPUS_PER_NODE"
+NNODES=`expr ${GPUS} / ${GPUS_PER_NODE}`
 
 python ./tools/launch.py \
     --nnodes ${NNODES} \

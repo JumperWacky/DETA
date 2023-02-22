@@ -21,6 +21,8 @@ from datasets.coco_eval import CocoEvaluator
 from datasets.panoptic_eval import PanopticEvaluator
 from datasets.data_prefetcher import data_prefetcher
 
+from torch.cuda import amp
+
 
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
@@ -33,16 +35,25 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     metric_logger.add_meter('grad_norm', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
     header = 'Epoch: [{}]'.format(epoch)
     print_freq = 10
-
-    prefetcher = data_prefetcher(data_loader, device, prefetch=True)
+    # WJ-change prefetcher device
+    prefetcher = data_prefetcher(data_loader, device, prefetch=False)
     samples, targets = prefetcher.next()
+
+    # WJ-add Scaler
+    cuda = device.type != 'cpu'
+    print("[Debug info] cuda enabled = ", cuda)
+    scaler = amp.GradScaler(enabled=cuda)
 
     # for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
     for _ in metric_logger.log_every(range(len(data_loader)), print_freq, header):
-        outputs = model(samples)
-        loss_dict = criterion(outputs, targets)
-        weight_dict = criterion.weight_dict
-        losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
+
+        # WJ-use autocast
+        # backbone uses autocast, transformer not use
+        outputs = model(samples, cuda)
+        with amp.autocast(enabled=cuda):
+            loss_dict = criterion(outputs, targets)
+            weight_dict = criterion.weight_dict
+            losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
 
         # reduce losses over all GPUs for logging purposes
         loss_dict_reduced = utils.reduce_dict(loss_dict)
@@ -59,13 +70,20 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             print(loss_dict_reduced)
             sys.exit(1)
 
-        optimizer.zero_grad()
-        losses.backward()
+        optimizer.zero_grad(set_to_none=True)
+        # WJ-change loss scaler
+        # losses.backward()
+        scaler.scale(losses).backward()
+        
         if max_norm > 0:
             grad_total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
         else:
             grad_total_norm = utils.get_total_grad_norm(model.parameters(), max_norm)
-        optimizer.step()
+        
+        # WJ-change optimizer to scaler
+        # optimizer.step()
+        scaler.step(optimizer)
+        scaler.update()
 
         metric_logger.update(loss=loss_value, **loss_dict_reduced_scaled, **loss_dict_reduced_unscaled)
         metric_logger.update(class_error=loss_dict_reduced['class_error'])

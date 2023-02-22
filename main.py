@@ -136,25 +136,45 @@ def main(args):
 
     if args.frozen_weights is not None:
         assert args.masks, "Frozen training is meant for segmentation only"
-    print(args)
 
     device = torch.device(args.device)
-
     # fix the seed for reproducibility
     seed = args.seed + utils.get_rank()
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
 
-    model, criterion, postprocessors = build_model(args)
+    model, criterion, postprocessors = build_model(args) 
     model.to(device)
 
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print('number of params:', n_parameters)
 
     dataset_train = build_dataset(image_set='train', args=args)
     dataset_val = build_dataset(image_set='val', args=args)
+
+    # WJ-add debug info
+    # print("Train dataset:")
+    # num_ann = 0
+    # for i in np.arange(1, 1000):
+    #     _, ann = dataset_train.__getitem__(i)
+    #     num_ann += ann['boxes'].shape[0]
+    # avg_ann = float(num_ann) / 1000.0
+    # print("Train avg num = ", avg_ann)
+    # # dataset_train.print_ids()
+    # # print("Images' shape:", img.shape)
+    # # print("Images:", img)
+    # # print("Annotations' shape", ann['boxes'].shape)
+    # # print("Annotations:", ann)
+
+    # print("Test dataset:")
+    # num_ann = 0
+    # for i in np.arange(1, 500):
+    #     _, ann = dataset_val.__getitem__(i)
+    #     num_ann += ann['boxes'].shape[0]
+    # avg_ann = float(num_ann) / 1000.0
+    # print("Test avg num = ", avg_ann)
+    # exit(0)
 
     if args.distributed:
         if args.cache_mode:
@@ -291,6 +311,8 @@ def main(args):
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             sampler_train.set_epoch(epoch)
+        # WJ add empty_cache
+        torch.cuda.empty_cache()
         train_stats = train_one_epoch(
             model, criterion, data_loader_train, optimizer, device, epoch, args.clip_max_norm)
         lr_scheduler.step()

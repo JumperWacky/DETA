@@ -29,6 +29,8 @@ from .segmentation import (DETRsegm, PostProcessPanoptic, PostProcessSegm,
 from .deformable_transformer import build_deforamble_transformer
 import copy
 
+from torch.cuda import amp
+
 
 def _get_clones(module, N):
     return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
@@ -113,7 +115,7 @@ class DeformableDETR(nn.Module):
             for box_embed in self.bbox_embed:
                 nn.init.constant_(box_embed.layers[-1].bias.data[2:], 0.0)
 
-    def forward(self, samples: NestedTensor):
+    def forward(self, samples: NestedTensor, isEnabled=True):
         """ The forward expects a NestedTensor, which consists of:
                - samples.tensor: batched images, of shape [batch_size x 3 x H x W]
                - samples.mask: a binary mask of shape [batch_size x H x W], containing 1 on padded pixels
@@ -128,30 +130,32 @@ class DeformableDETR(nn.Module):
                - "aux_outputs": Optional, only returned when auxilary losses are activated. It is a list of
                                 dictionnaries containing the two above keys for each decoder layer.
         """
-        if not isinstance(samples, NestedTensor):
-            samples = nested_tensor_from_tensor_list(samples)
-        features, pos = self.backbone(samples)
+        # WJ-add backbone's autocast
+        with amp.autocast(enabled=isEnabled):
+            if not isinstance(samples, NestedTensor):
+                samples = nested_tensor_from_tensor_list(samples)
+            features, pos = self.backbone(samples)
 
-        srcs = []
-        masks = []
-        for l, feat in enumerate(features):
-            src, mask = feat.decompose()
-            srcs.append(self.input_proj[l](src))
-            masks.append(mask)
-            assert mask is not None
-        if self.num_feature_levels > len(srcs):
-            _len_srcs = len(srcs)
-            for l in range(_len_srcs, self.num_feature_levels):
-                if l == _len_srcs:
-                    src = self.input_proj[l](features[-1].tensors)
-                else:
-                    src = self.input_proj[l](srcs[-1])
-                m = samples.mask
-                mask = F.interpolate(m[None].float(), size=src.shape[-2:]).to(torch.bool)[0]
-                pos_l = self.backbone[1](NestedTensor(src, mask)).to(src.dtype)
-                srcs.append(src)
+            srcs = []
+            masks = []
+            for l, feat in enumerate(features):
+                src, mask = feat.decompose()
+                srcs.append(self.input_proj[l](src))
                 masks.append(mask)
-                pos.append(pos_l)
+                assert mask is not None
+            if self.num_feature_levels > len(srcs):
+                _len_srcs = len(srcs)
+                for l in range(_len_srcs, self.num_feature_levels):
+                    if l == _len_srcs:
+                        src = self.input_proj[l](features[-1].tensors)
+                    else:
+                        src = self.input_proj[l](srcs[-1])
+                    m = samples.mask
+                    mask = F.interpolate(m[None].float(), size=src.shape[-2:]).to(torch.bool)[0]
+                    pos_l = self.backbone[1](NestedTensor(src, mask)).to(src.dtype)
+                    srcs.append(src)
+                    masks.append(mask)
+                    pos.append(pos_l)
 
         query_embeds = None
         if not self.two_stage:
@@ -486,7 +490,8 @@ class NMSPostProcess(nn.Module):
             score = all_scores[b]
             lbls = all_labels[b]
 
-            pre_topk = score.topk(10000).indices
+            pre_topk = score.topk(min(10000, score.shape[0])).indices
+            # pre_topk = score.topk(10000).indices
             box = box[pre_topk]
             score = score[pre_topk]
             lbls = lbls[pre_topk]
@@ -499,7 +504,6 @@ class NMSPostProcess(nn.Module):
             })
 
         return results
-
 
 
 class MLP(nn.Module):
@@ -518,9 +522,11 @@ class MLP(nn.Module):
 
 
 def build(args):
-    num_classes = 20 if args.dataset_file != 'coco' else 91
-    if args.dataset_file == "coco_panoptic":
-        num_classes = 250
+    # num_classes = 20 if args.dataset_file != 'coco' else 91
+    # if args.dataset_file == "coco_panoptic":
+    #     num_classes = 250
+    # WJ-change num_classes
+    num_classes = 5
     device = torch.device(args.device)
 
     backbone = build_backbone(args)
